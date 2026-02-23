@@ -8,45 +8,38 @@ const path       = require('path');
 // ============================================================
 //  ⚙️  НАСТРОЙКИ
 // ============================================================
-const BOT_TOKEN      = '8677571796:AAGO8cPscC3h0uOPHJFeCZnLlinQ5Iyb0YU';   // 👉 Токен от @BotFather
-const ADMIN_PASSWORD = 'artem428642';             // 🔑 Пароль администратора
+const BOT_TOKEN      = 'ВАШ_ТОКЕН_ЗДЕСЬ';   // 👉 Токен от @BotFather
+const ADMIN_PASSWORD = 'admin123';             // 🔑 Пароль администратора
 const SCHEDULE_URL   = 'https://rasp44.ru/rasp.htm';
 const DATA_FILE      = path.join(__dirname, 'schedule_data.json');
 
 // ⏰ Время автообновления (24-часовой формат)
 const AUTO_UPDATE_TIMES = [
-  { hour: 7,  minute: 0  },  // 07:00
-  { hour: 14, minute: 0  },  // 14:00
+  { hour: 7,  minute: 0 },
+  { hour: 14, minute: 0 },
 ];
-
-// 📌 5А — 1-я смена, Пятница (колонка: 2 = предмет, 3 = кабинет)
-// Структура строки: [время, номер, 5а_предмет, 5а_каб, 5б_предмет, 5б_каб, ...]
-const CLASS_COL   = 2;   // индекс ячейки с предметом для 5А
-const ROOM_COL    = 3;   // индекс ячейки с кабинетом для 5А
-const TABLE_INDEX = 0;   // 0 = первая таблица на странице (1-я смена Пятница)
 // ============================================================
 
 const DAYS_RU = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 
 // Иконки предметов
 const SUBJECT_ICONS = {
-  'математик':  '🔢',
-  'алгебра':    '🔢',
-  'геометри':   '📐',
-  'русский':    '📝',
+  'матем':      '🔢',
+  'алгебр':     '🔢',
+  'геометр':    '📐',
   'русск':      '📝',
-  'литератур':  '📖',
+  'литерат':    '📖',
   'английск':   '🇬🇧',
   'иностран':   '🌍',
-  'история':    '🏛',
-  'географи':   '🌍',
+  'истори':     '🏛',
+  'географи':   '🗺',
   'биологи':    '🌿',
-  'химия':      '⚗️',
-  'физика':     '⚡',
-  'информатик': '💻',
+  'хими':       '⚗️',
+  'физик':      '⚡',
+  'информат':   '💻',
   'технолог':   '🔧',
   'труд':       '🔧',
-  'физкультур': '⚽',
+  'физкульт':   '⚽',
   'физ-ра':     '⚽',
   'физра':      '⚽',
   'изо':        '🎨',
@@ -54,166 +47,177 @@ const SUBJECT_ICONS = {
   'музык':      '🎵',
   'обж':        '🦺',
   'обществ':    '👥',
-  'классн':     '📋',
   'кл. час':    '📋',
+  'классн':     '📋',
 };
 
-function getSubjectIcon(subject) {
-  const lower = subject.toLowerCase();
+function getIcon(subject) {
+  const s = subject.toLowerCase();
   for (const [key, icon] of Object.entries(SUBJECT_ICONS)) {
-    if (lower.includes(key)) return icon;
+    if (s.includes(key)) return icon;
   }
   return '📚';
 }
 
 // ============================================================
-//  💾 Хранилище данных
+//  💾  Хранилище
 // ============================================================
 function loadData() {
   if (fs.existsSync(DATA_FILE)) {
     try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch {}
   }
-  return {
-    schedule:    null,  // { "1": { time, subject, room }, ... }
-    overrides:   {},    // { "1": "текст урока" }   '' = удалён
-    lastUpdated: null,
-    admins:      [],
-    subscribers: [],
-  };
+  return { schedule: null, overrides: {}, lastUpdated: null, admins: [], subscribers: [] };
 }
-
 function saveData(d) { fs.writeFileSync(DATA_FILE, JSON.stringify(d, null, 2), 'utf8'); }
 
 let db = loadData();
-const sessions = {};   // временные состояния пользователей
+const sessions = {};
 
 // ============================================================
-//  🌐 Парсинг сайта
+//  🌐  Парсинг сайта
 // ============================================================
 async function fetchScheduleFromSite() {
   const res  = await axios.get(SCHEDULE_URL, { responseType: 'arraybuffer', timeout: 15000 });
   const html = iconv.decode(Buffer.from(res.data), 'win1251');
   const $    = cheerio.load(html);
-  const tables = $('table');
-
-  const table = $(tables[TABLE_INDEX]);
-  if (!table.length) throw new Error(`Таблица с индексом ${TABLE_INDEX} не найдена`);
 
   const lessons = {};
-  let headerPassed = false;
 
-  table.find('tr').each((_, row) => {
-    const cells = $(row).find('td, th');
-    if (!cells.length) return;
+  // Перебираем все таблицы
+  $('table').each((tIdx, table) => {
+    if (Object.keys(lessons).length > 0) return; // нашли — стоп
 
-    const timeVal = $(cells[0]).text().trim();
+    const rows = $(table).find('tr');
+    let classColIdx = -1;  // индекс ячейки с предметом 5А
+    let headerRowIdx = -1;
 
-    // Ждём строку с временем вида "8:00 - 8:30"
-    if (!timeVal.match(/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/)) return;
+    // Ищем строку-заголовок с названием класса "5а"
+    rows.each((rIdx, row) => {
+      if (classColIdx !== -1) return;
+      const cells = $(row).find('td, th');
+      cells.each((cIdx, cell) => {
+        const t = $(cell).text().trim().toLowerCase().replace(/\s+/g, '');
+        if (t === '5а' || t === '5a') {
+          classColIdx = cIdx;
+          headerRowIdx = rIdx;
+          console.log(`[Парсер] Нашёл "5а" в таблице #${tIdx}, строке #${rIdx}, колонке #${cIdx}`);
+          return false; // break
+        }
+      });
+    });
 
-    headerPassed = true;
+    if (classColIdx === -1) return; // нет 5А в этой таблице
 
-    const num     = cells.length > 1 ? $(cells[1]).text().trim() : '?';
-    const subject = CLASS_COL < cells.length ? $(cells[CLASS_COL]).text().trim() : '';
-    const room    = ROOM_COL  < cells.length ? $(cells[ROOM_COL ]).text().trim() : '';
+    // Читаем строки с уроками ПОСЛЕ заголовка
+    rows.each((rIdx, row) => {
+      if (rIdx <= headerRowIdx) return;
 
-    if (num && subject) {
-      lessons[num] = { time: timeVal, subject, room };
-    }
+      const cells = $(row).find('td, th');
+      if (cells.length === 0) return;
+
+      const time = $(cells.eq(0)).text().trim();
+
+      // Строка урока: время в формате "8:00 - 8:30"
+      if (!/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(time)) return;
+
+      const num     = cells.length > 1 ? $(cells.eq(1)).text().trim() : '?';
+      // Предмет — в колонке classColIdx
+      const subject = classColIdx < cells.length ? $(cells.eq(classColIdx)).text().trim() : '';
+      // Кабинет — следующая колонка
+      const room    = (classColIdx + 1) < cells.length ? $(cells.eq(classColIdx + 1)).text().trim() : '';
+
+      console.log(`[Парсер] Урок ${num}: время="${time}" предмет="${subject}" каб="${room}"`);
+
+      if (num && subject) {
+        lessons[num] = { time, subject, room };
+      }
+    });
   });
 
   if (!Object.keys(lessons).length) {
-    throw new Error('Уроки для 5А не найдены. Проверьте TABLE_INDEX / CLASS_COL в настройках.');
+    throw new Error('Уроки для 5А не найдены! Проверьте структуру сайта.');
   }
 
   return lessons;
 }
 
 // ============================================================
-//  📋 Формирование текста расписания
+//  📋  Текст расписания
 // ============================================================
 function buildScheduleText(forAdmin = false) {
   const now     = new Date();
   const dateStr = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const dayStr  = DAYS_RU[now.getDay()];
   const updStr  = db.lastUpdated
-    ? `🕐 Обновлено: ${new Date(db.lastUpdated).toLocaleString('ru-RU')}`
-    : '🕐 Ещё не обновлялось';
+    ? `🕐 ${new Date(db.lastUpdated).toLocaleString('ru-RU')}`
+    : '🕐 Не обновлялось';
 
   const lines = [
-    `🏫 Расписание 5А класса`,
+    `🏫 *Расписание 5А класса*`,
     `📆 ${dateStr} — ${dayStr}`,
     updStr,
-    `━━━━━━━━━━━━━━━━━━━━━━`,
+    `━━━━━━━━━━━━━━━━━━━`,
   ];
 
-  const base    = db.schedule  || {};
-  const over    = db.overrides || {};
-  const allKeys = [...new Set([...Object.keys(base), ...Object.keys(over)])]
+  const base  = db.schedule  || {};
+  const over  = db.overrides || {};
+  const keys  = [...new Set([...Object.keys(base), ...Object.keys(over)])]
     .sort((a, b) => Number(a) - Number(b));
 
-  if (!allKeys.length) {
-    lines.push('⚠️ Расписание пока не загружено.');
-    lines.push('Используйте /update (только для администратора).');
+  if (!keys.length) {
+    lines.push('⚠️ Расписание не загружено.');
     return lines.join('\n');
   }
 
-  for (const num of allKeys) {
-    const edited = forAdmin && num in over;
-
+  for (const num of keys) {
     if (num in over) {
       if (over[num] === '') {
-        if (forAdmin) lines.push(`❌ ${num}. (урок удалён) ✏️`);
+        if (forAdmin) lines.push(`❌ ${num}. _(урок удалён)_ ✏️`);
       } else {
-        const icon = getSubjectIcon(over[num]);
-        lines.push(`${icon} ${num}. ${over[num]}${forAdmin ? ' ✏️' : ''}`);
+        const icon = getIcon(over[num]);
+        lines.push(`${icon} *${num}.* ${over[num]}${forAdmin ? ' ✏️' : ''}`);
       }
     } else if (base[num]) {
       const { time, subject, room } = base[num];
-      const icon    = getSubjectIcon(subject);
-      const roomStr = room ? ` 🚪${room}` : '';
-      lines.push(`${icon} ${num}. ${time} — ${subject}${roomStr}`);
+      const icon    = getIcon(subject);
+      const roomStr = room ? ` 🚪каб. ${room}` : '';
+      lines.push(`${icon} *${num}.* ${time} — ${subject}${roomStr}`);
     }
   }
 
-  lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
-
-  if (forAdmin) lines.push('✏️ — урок изменён вручную');
+  lines.push(`━━━━━━━━━━━━━━━━━━━`);
+  if (forAdmin) lines.push('_✏️ — изменено вручную_');
 
   return lines.join('\n');
 }
 
 // ============================================================
-//  🔄 Обновление расписания с сайта
+//  🔄  Автообновление
 // ============================================================
 async function updateSchedule(notifyAdmins = false) {
-  const ts = new Date().toLocaleString('ru-RU');
-  console.log(`[${ts}] Обновление расписания...`);
+  console.log(`[${new Date().toLocaleString('ru-RU')}] Обновление расписания...`);
   try {
-    const lessons   = await fetchScheduleFromSite();
-    db.schedule     = lessons;
-    db.lastUpdated  = new Date().toISOString();
+    const lessons  = await fetchScheduleFromSite();
+    db.schedule    = lessons;
+    db.lastUpdated = new Date().toISOString();
     saveData(db);
-    console.log(`✅ Обновлено: ${Object.keys(lessons).length} уроков.`);
-    console.log('Данные:', JSON.stringify(lessons, null, 2));
+    console.log(`✅ Сохранено ${Object.keys(lessons).length} уроков.`);
 
     const text = buildScheduleText();
-
     if (notifyAdmins)
       for (const id of db.admins)
-        bot.sendMessage(id, `✅ Расписание автоматически обновлено!\n\n${text}`).catch(() => {});
+        bot.sendMessage(id, `✅ Расписание обновлено!\n\n${text}`, { parse_mode: 'Markdown' }).catch(() => {});
 
     for (const id of db.subscribers)
-      bot.sendMessage(id, `🔔 Расписание 5А обновлено!\n\n${text}`).catch(() => {});
+      bot.sendMessage(id, `🔔 Расписание 5А обновлено!\n\n${text}`, { parse_mode: 'Markdown' }).catch(() => {});
 
     return true;
   } catch (err) {
-    console.error('❌ Ошибка обновления:', err.message);
+    console.error('❌ Ошибка:', err.message);
     return false;
   }
 }
 
-// Планировщик (проверка каждые 30 сек)
 function scheduleAutoUpdate() {
   const triggered = {};
   setInterval(() => {
@@ -226,9 +230,8 @@ function scheduleAutoUpdate() {
       }
     }
   }, 30_000);
-
-  const times = AUTO_UPDATE_TIMES
-    .map(t => `${String(t.hour).padStart(2,'0')}:${String(t.minute).padStart(2,'0')}`).join(' и ');
+  const times = AUTO_UPDATE_TIMES.map(t =>
+    `${String(t.hour).padStart(2,'0')}:${String(t.minute).padStart(2,'0')}`).join(' и ');
   console.log(`⏰ Автообновление: ${times}`);
 }
 
@@ -237,10 +240,7 @@ function scheduleAutoUpdate() {
 // ============================================================
 const mainKeyboard = () => ({
   reply_markup: {
-    keyboard: [
-      ['📋 Расписание'],
-      ['🔔 Подписаться', '🔕 Отписаться'],
-    ],
+    keyboard: [['📋 Расписание'], ['🔔 Подписаться', '🔕 Отписаться']],
     resize_keyboard: true,
   },
 });
@@ -248,89 +248,66 @@ const mainKeyboard = () => ({
 const adminKeyboard = () => ({
   reply_markup: {
     keyboard: [
-      ['📋 Расписание', '🔄 Обновить с сайта'],
-      ['✏️ Изменить урок', '🗑 Удалить урок'],
-      ['↩️ Сбросить правки', '👤 Выйти из admin'],
+      ['📋 Расписание',    '🔄 Обновить с сайта'],
+      ['✏️ Изменить урок', '🗑 Удалить урок'    ],
+      ['↩️ Сбросить правки','👤 Выйти из admin' ],
     ],
     resize_keyboard: true,
   },
 });
 
 // ============================================================
-//  🤖 Бот
+//  🤖  Бот
 // ============================================================
 if (BOT_TOKEN === 'ВАШ_ТОКЕН_ЗДЕСЬ') {
-  console.error('❌ Вставьте токен бота в переменную BOT_TOKEN!');
+  console.error('❌ Вставьте токен бота в BOT_TOKEN!');
   process.exit(1);
 }
 
 const bot     = new TelegramBot(BOT_TOKEN, { polling: true });
-const isAdmin = (id) => db.admins.includes(id);
+const isAdmin = id => db.admins.includes(id);
 
-// ── /start ───────────────────────────────────────────────────
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start/, msg => {
   sessions[msg.chat.id] = null;
   bot.sendMessage(msg.chat.id,
-    '👋 Привет! Я бот расписания *5А класса* 🏫\n\n' +
-    '📋 /rasp — показать расписание\n' +
+    '👋 Привет\\! Я бот расписания *5А класса* 🏫\n\n' +
+    '📋 /rasp — расписание\n' +
     '🔔 /subscribe — подписаться на обновления\n' +
     '🔕 /unsubscribe — отписаться\n' +
-    '🔐 /admin — для администратора\n' +
-    'ℹ️ /help — помощь',
-    { parse_mode: 'Markdown', ...mainKeyboard() }
+    '🔐 /admin — для администратора',
+    { parse_mode: 'MarkdownV2', ...mainKeyboard() }
   );
 });
 
-// ── /help ────────────────────────────────────────────────────
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id,
-    'ℹ️ *Команды бота:*\n\n' +
-    '📋 /rasp — расписание 5А\n' +
-    '🔔 /subscribe — подписаться на авторассылку\n' +
-    '🔕 /unsubscribe — отписаться\n' +
-    '🔐 /admin — войти как администратор\n\n' +
-    '*Возможности администратора:*\n' +
-    '🔄 Обновить расписание с сайта вручную\n' +
-    '✏️ Изменить любой урок\n' +
-    '🗑 Удалить урок\n' +
-    '↩️ Сбросить все ручные правки',
-    { parse_mode: 'Markdown' }
-  );
+bot.onText(/^(\/rasp|📋 Расписание)$/, msg => {
+  bot.sendMessage(msg.chat.id, buildScheduleText(isAdmin(msg.chat.id)), { parse_mode: 'Markdown' });
 });
 
-// ── /rasp ────────────────────────────────────────────────────
-bot.onText(/^(\/rasp|📋 Расписание)$/, (msg) => {
-  bot.sendMessage(msg.chat.id, buildScheduleText(isAdmin(msg.chat.id)));
-});
-
-// ── /subscribe ───────────────────────────────────────────────
-bot.onText(/^(\/subscribe|🔔 Подписаться)$/, (msg) => {
+bot.onText(/^(\/subscribe|🔔 Подписаться)$/, msg => {
   const id = msg.chat.id;
   if (!db.subscribers.includes(id)) {
     db.subscribers.push(id); saveData(db);
-    bot.sendMessage(id, '✅ Вы подписались!\nБуду присылать расписание при каждом обновлении 🔔');
+    bot.sendMessage(id, '✅ Подписались! Буду присылать расписание при обновлении 🔔');
   } else {
     bot.sendMessage(id, 'ℹ️ Вы уже подписаны.');
   }
 });
 
-// ── /unsubscribe ─────────────────────────────────────────────
-bot.onText(/^(\/unsubscribe|🔕 Отписаться)$/, (msg) => {
+bot.onText(/^(\/unsubscribe|🔕 Отписаться)$/, msg => {
   const id = msg.chat.id;
   db.subscribers = db.subscribers.filter(x => x !== id); saveData(db);
-  bot.sendMessage(id, '🔕 Вы отписались от обновлений.');
+  bot.sendMessage(id, '🔕 Вы отписались.');
 });
 
-// ── /admin ───────────────────────────────────────────────────
-bot.onText(/\/admin/, (msg) => {
+bot.onText(/\/admin/, msg => {
   const id = msg.chat.id;
   if (isAdmin(id)) { bot.sendMessage(id, '✅ Вы уже администратор.', adminKeyboard()); return; }
   sessions[id] = { state: 'awaiting_password' };
-  bot.sendMessage(id, '🔐 Введите пароль администратора:', { reply_markup: { force_reply: true } });
+  bot.sendMessage(id, '🔐 Введите пароль:', { reply_markup: { force_reply: true } });
 });
 
-// ── Машина состояний ─────────────────────────────────────────
-bot.on('message', async (msg) => {
+// Машина состояний
+bot.on('message', async msg => {
   if (!msg.text || msg.text.startsWith('/')) return;
   const id      = msg.chat.id;
   const text    = msg.text.trim();
@@ -348,32 +325,30 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Выход из admin
   if (text === '👤 Выйти из admin') {
     db.admins = db.admins.filter(x => x !== id); saveData(db);
     sessions[id] = null;
-    bot.sendMessage(id, '👋 Вы вышли из режима администратора.', mainKeyboard());
+    bot.sendMessage(id, '👋 Вы вышли.', mainKeyboard());
     return;
   }
 
-  // Обновить с сайта
   if (text === '🔄 Обновить с сайта') {
     if (!isAdmin(id)) return;
-    await bot.sendMessage(id, '⏳ Загружаю расписание с сайта...');
+    await bot.sendMessage(id, '⏳ Загружаю...');
     const ok = await updateSchedule(false);
     bot.sendMessage(id,
-      ok ? `✅ Расписание обновлено!\n\n${buildScheduleText(true)}` : '❌ Не удалось загрузить расписание.',
-      adminKeyboard()
+      ok ? buildScheduleText(true) : '❌ Не удалось загрузить расписание.',
+      { parse_mode: 'Markdown', ...adminKeyboard() }
     );
     return;
   }
 
-  // Изменить урок — запрос номера
+  // Изменить урок — шаг 1: номер
   if (text === '✏️ Изменить урок') {
     if (!isAdmin(id)) return;
     sessions[id] = { state: 'edit_num' };
     bot.sendMessage(id,
-      `${buildScheduleText(true)}\n\n✏️ Введите *номер урока* для изменения:`,
+      buildScheduleText(true) + '\n\n✏️ Введите *номер урока* для изменения:',
       { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
     );
     return;
@@ -383,30 +358,28 @@ bot.on('message', async (msg) => {
     const num = text.replace(/\D/g, '');
     if (!num) { bot.sendMessage(id, '❌ Введите число.'); return; }
     const cur = db.overrides[num] !== undefined
-      ? (db.overrides[num] || '(урок удалён)')
+      ? (db.overrides[num] || '(удалён)')
       : db.schedule?.[num]
-        ? `${db.schedule[num].time} — ${db.schedule[num].subject}${db.schedule[num].room ? ` (каб. ${db.schedule[num].room})` : ''}`
-        : '(пусто)';
+        ? `${db.schedule[num].time} — ${db.schedule[num].subject} каб.${db.schedule[num].room}`
+        : '(нет данных)';
     sessions[id] = { state: 'edit_text', num };
     bot.sendMessage(id,
-      `📝 Урок №${num}\nСейчас: *${cur}*\n\n` +
-      'Введите новое значение.\nПример: `08:00 - 08:30 — Математика (каб. 201)`\n\n' +
-      'Или `-` чтобы удалить урок.',
+      `📝 Урок №*${num}*\nСейчас: _${cur}_\n\nВведите новое значение:\n` +
+      '`8:00 - 8:30 — Математика (каб. 201)`\n\nИли `-` для удаления.',
       { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
     );
     return;
   }
 
+  // Изменить урок — шаг 2: новый текст
   if (session?.state === 'edit_text') {
     const { num } = session; sessions[id] = null;
-    if (text === '-') {
-      db.overrides[num] = '';
-      bot.sendMessage(id, `🗑 Урок №${num} удалён.`, adminKeyboard());
-    } else {
-      db.overrides[num] = text;
-      bot.sendMessage(id, `✅ Урок №${num} изменён:\n${num}. ${text}`, adminKeyboard());
-    }
+    db.overrides[num] = text === '-' ? '' : text;
     saveData(db);
+    bot.sendMessage(id,
+      text === '-' ? `🗑 Урок №${num} удалён.` : `✅ Урок №${num}:\n${num}. ${text}`,
+      adminKeyboard()
+    );
     return;
   }
 
@@ -415,7 +388,7 @@ bot.on('message', async (msg) => {
     if (!isAdmin(id)) return;
     sessions[id] = { state: 'delete_num' };
     bot.sendMessage(id,
-      `${buildScheduleText(true)}\n\n🗑 Введите *номер урока* для удаления:`,
+      buildScheduleText(true) + '\n\n🗑 Введите *номер урока* для удаления:',
       { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
     );
     return;
@@ -430,12 +403,11 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Сбросить правки
+  // Сброс правок
   if (text === '↩️ Сбросить правки') {
     if (!isAdmin(id)) return;
     sessions[id] = { state: 'confirm_reset' };
-    bot.sendMessage(id,
-      '⚠️ Все ручные изменения будут удалены, расписание вернётся к данным с сайта.\nВведите *ДА* для подтверждения:',
+    bot.sendMessage(id, '⚠️ Все ручные изменения удалятся.\nВведите *ДА* для подтверждения:',
       { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
     );
     return;
@@ -445,22 +417,21 @@ bot.on('message', async (msg) => {
     sessions[id] = null;
     if (text.toLowerCase() === 'да') {
       db.overrides = {}; saveData(db);
-      bot.sendMessage(id, '✅ Все ручные правки сброшены.', adminKeyboard());
+      bot.sendMessage(id, '✅ Правки сброшены.', adminKeyboard());
     } else {
-      bot.sendMessage(id, '↩️ Сброс отменён.', adminKeyboard());
+      bot.sendMessage(id, '↩️ Отменено.', adminKeyboard());
     }
     return;
   }
 });
 
-bot.on('polling_error', (err) => console.error('Polling error:', err.message));
+bot.on('polling_error', err => console.error('Polling error:', err.message));
 
 // ============================================================
-//  🚀 Запуск
+//  🚀  Старт
 // ============================================================
-updateSchedule(false).then((ok) => {
-  if (ok) console.log('✅ Расписание загружено при старте.');
-  else    console.warn('⚠️ Расписание не удалось загрузить при старте. Попробую позже.');
-  console.log('🤖 Бот запущен! Нажмите Ctrl+C для остановки.');
+updateSchedule(false).then(ok => {
+  if (!ok) console.warn('⚠️ Расписание не загружено при старте.');
+  console.log('🤖 Бот работает! Ctrl+C для остановки.');
 });
 scheduleAutoUpdate();
