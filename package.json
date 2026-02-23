@@ -1,0 +1,15 @@
+{
+  "name": "school-schedule-bot",
+  "version": "2.0.0",
+  "description": "Telegram бот расписания уроков 5А класса с админкой и автообновлением",
+  "main": "school_bot.js",
+  "scripts": {
+    "start": "node school_bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0",
+    "iconv-lite": "^0.6.3"
+  }
+}
