@@ -8,8 +8,8 @@ const path       = require('path');
 // ============================================================
 //  ⚙️  НАСТРОЙКИ
 // ============================================================
-const BOT_TOKEN      = 'ВАШ_ТОКЕН_ЗДЕСЬ';   // 👉 Токен от @BotFather
-const ADMIN_PASSWORD = 'admin123';             // 🔑 Пароль администратора
+const BOT_TOKEN      = '8677571796:AAGO8cPscC3h0uOPHJFeCZnLlinQ5Iyb0YU';   // 👉 Токен от @BotFather
+const ADMIN_PASSWORD = 'arten428642';             // 🔑 Пароль администратора
 const SCHEDULE_URL   = 'https://rasp44.ru/rasp.htm';
 const DATA_FILE      = path.join(__dirname, 'schedule_data.json');
 
