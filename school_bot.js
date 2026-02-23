@@ -8,8 +8,8 @@ const path       = require('path');
 // ============================================================
 //  ⚙️  НАСТРОЙКИ
 // ============================================================
-const BOT_TOKEN      = '8677571796:AAGO8cPscC3h0uOPHJFeCZnLlinQ5Iyb0YU';   // 👉 Токен от @BotFather
-const ADMIN_PASSWORD = 'artem428642';             // 🔑 Пароль администратора
+const BOT_TOKEN      = 'ВАШ_ТОКЕН_ЗДЕСЬ';   // 👉 Токен от @BotFather
+const ADMIN_PASSWORD = 'admin123';             // 🔑 Пароль администратора
 const SCHEDULE_URL   = 'https://rasp44.ru/rasp.htm';
 const DATA_FILE      = path.join(__dirname, 'schedule_data.json');
 
@@ -83,22 +83,25 @@ async function fetchScheduleFromSite() {
 
   const lessons = {};
 
-  // Перебираем все таблицы
+  // Перебираем все таблицы — ищем ту, где есть заголовок "5а"
   $('table').each((tIdx, table) => {
-    if (Object.keys(lessons).length > 0) return; // нашли — стоп
+    if (Object.keys(lessons).length > 0) return; // уже нашли — стоп
 
-    const rows = $(table).find('tr');
-    let classColIdx = -1;  // индекс ячейки с предметом 5А
+    // Работаем ТОЛЬКО с прямыми дочерними строками этой таблицы (не вложенных таблиц)
+    const rows = $(table).children('tbody, thead').children('tr').add($(table).children('tr'));
+
+    let classColIdx  = -1;
     let headerRowIdx = -1;
 
-    // Ищем строку-заголовок с названием класса "5а"
+    // Шаг 1: найти строку-заголовок с "5а"
     rows.each((rIdx, row) => {
       if (classColIdx !== -1) return;
-      const cells = $(row).find('td, th');
+      // Только прямые ячейки этой строки
+      const cells = $(row).children('td, th');
       cells.each((cIdx, cell) => {
         const t = $(cell).text().trim().toLowerCase().replace(/\s+/g, '');
         if (t === '5а' || t === '5a') {
-          classColIdx = cIdx;
+          classColIdx  = cIdx;
           headerRowIdx = rIdx;
           console.log(`[Парсер] Нашёл "5а" в таблице #${tIdx}, строке #${rIdx}, колонке #${cIdx}`);
           return false; // break
@@ -106,30 +109,38 @@ async function fetchScheduleFromSite() {
       });
     });
 
-    if (classColIdx === -1) return; // нет 5А в этой таблице
+    if (classColIdx === -1) return; // нет 5А в этой таблице — идём дальше
 
-    // Читаем строки с уроками ПОСЛЕ заголовка
+    // Шаг 2: читаем уроки ТОЛЬКО из строк ЭТОЙ же таблицы после заголовка
+    // Как только встречаем строку без времени — останавливаемся (конец блока)
+    let lessonCount = 0;
+
     rows.each((rIdx, row) => {
-      if (rIdx <= headerRowIdx) return;
+      if (rIdx <= headerRowIdx) return; // пропускаем заголовок и всё до него
 
-      const cells = $(row).find('td, th');
+      const cells = $(row).children('td, th');
       if (cells.length === 0) return;
 
       const time = $(cells.eq(0)).text().trim();
 
-      // Строка урока: время в формате "8:00 - 8:30"
-      if (!/^\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}$/.test(time)) return;
+      // Строка с уроком: время в формате "8:00 - 8:30" или "10:30 - 11:10"
+      if (!/^\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}$/.test(time)) {
+        // Если уже нашли хотя бы один урок и наткнулись на нетиповую строку — стоп
+        if (lessonCount > 0) return false; // break — выходим из цикла rows
+        return; // continue — ещё не начали, пропускаем
+      }
 
       const num     = cells.length > 1 ? $(cells.eq(1)).text().trim() : '?';
-      // Предмет — в колонке classColIdx
-      const subject = classColIdx < cells.length ? $(cells.eq(classColIdx)).text().trim() : '';
-      // Кабинет — следующая колонка
-      const room    = (classColIdx + 1) < cells.length ? $(cells.eq(classColIdx + 1)).text().trim() : '';
+      const subject = classColIdx < cells.length
+        ? $(cells.eq(classColIdx)).text().trim() : '';
+      const room    = (classColIdx + 1) < cells.length
+        ? $(cells.eq(classColIdx + 1)).text().trim() : '';
 
-      console.log(`[Парсер] Урок ${num}: время="${time}" предмет="${subject}" каб="${room}"`);
+      console.log(`[Парсер] Урок ${num}: "${time}" | "${subject}" | каб. "${room}"`);
 
       if (num && subject) {
         lessons[num] = { time, subject, room };
+        lessonCount++;
       }
     });
   });
