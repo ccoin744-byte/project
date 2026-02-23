@@ -8,10 +8,36 @@ const path       = require('path');
 // ============================================================
 //  ⚙️  НАСТРОЙКИ
 // ============================================================
-const BOT_TOKEN      = '8677571796:AAGO8cPscC3h0uOPHJFeCZnLlinQ5Iyb0YU';   // 👉 Токен от @BotFather
-const ADMIN_PASSWORD = '428642';             // 🔑 Пароль администратора
+const BOT_TOKEN      = 'ВАШ_ТОКЕН_ЗДЕСЬ';   // 👉 Токен от @BotFather
+const ADMIN_PASSWORD = 'admin123';             // 🔑 Пароль администратора
 const SCHEDULE_URL   = 'https://rasp44.ru/rasp.htm';
 const DATA_FILE      = path.join(__dirname, 'schedule_data.json');
+
+const TIMEZONE_OFFSET_HOURS = 5; // ⏱ GMT+5 (измените на ваш часовой пояс)
+
+// Вспомогательная функция: дата/время с учётом GMT+5
+function toTZ(date) {
+  const offsetMs = TIMEZONE_OFFSET_HOURS * 60 * 60 * 1000;
+  return new Date(date.getTime() + offsetMs);
+}
+function formatDate(date) {
+  const d = toTZ(date);
+  const dd   = String(d.getUTCDate()).padStart(2, '0');
+  const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = d.getUTCFullYear();
+  return `${dd}.${mm}.${yyyy}`;
+}
+function formatTime(date) {
+  const d = toTZ(date);
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mn = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${hh}:${mn}:${ss}`;
+}
+function formatDateTime(date) {
+  return `${formatDate(date)}, ${formatTime(date)}`;
+}
+
 
 // ⏰ Время автообновления (24-часовой формат)
 const AUTO_UPDATE_TIMES = [
@@ -157,10 +183,11 @@ async function fetchScheduleFromSite() {
 // ============================================================
 function buildScheduleText(forAdmin = false) {
   const now     = new Date();
-  const dateStr = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const dayStr  = DAYS_RU[now.getDay()];
+  const tzNow   = toTZ(now);
+  const dateStr = formatDate(now);
+  const dayStr  = DAYS_RU[tzNow.getUTCDay()];
   const updStr  = db.lastUpdated
-    ? `🕐 ${new Date(db.lastUpdated).toLocaleString('ru-RU')}`
+    ? `🕐 ${formatDateTime(new Date(db.lastUpdated))} (GMT+${TIMEZONE_OFFSET_HOURS})`
     : '🕐 Не обновлялось';
 
   const lines = [
