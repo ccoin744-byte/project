@@ -41,7 +41,7 @@ function formatDateTime(date) {
 
 // ⏰ Время автообновления (24-часовой формат)
 const AUTO_UPDATE_TIMES = [
-  { hour: 7,  minute: 0 },
+  { hour: 2,  minute: 0 },
   { hour: 14, minute: 0 },
 ];
 // ============================================================
